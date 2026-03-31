@@ -1,19 +1,7 @@
 package main
 
-import (
-	"fmt"
-
-	"github.com/fatih/color"
-	"github.com/olekukonko/tablewriter"
-	"gopkg.in/yaml.v3"
-)
+import "github.com/oxGrad/deadgit/cmd"
 
 func main() {
-	fmt.Println("deadgit - Azure DevOps Git activity scanner")
+	cmd.Run()
 }
-
-var (
-	_ = color.New()
-	_ = tablewriter.NewWriter(nil)
-	_ = yaml.Decoder{}
-)
