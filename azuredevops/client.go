@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -38,7 +39,7 @@ func (c *Client) Get(url string, dest interface{}) error {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := baseDelay * time.Duration(1<<uint(attempt-1))
-			slog.Debug("retrying request", "url", url, "attempt", attempt+1, "delay", delay)
+			zap.L().Debug("retrying request", zap.String("url", url), zap.Int("attempt", attempt+1), zap.Duration("delay", delay))
 			time.Sleep(delay)
 		}
 
