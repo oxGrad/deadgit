@@ -38,6 +38,8 @@ The program scans all Azure DevOps repositories in an organization and produces 
 
 - `azuredevops/client.go` — `Client.Get` (JSON decode) and `Client.GetRaw` (bytes) share identical retry logic: 3 attempts, exponential backoff starting at 500ms, honors `Retry-After` header on 429. Non-retriable errors (non-429, non-5xx) return immediately. **404 is not retried** — callers like `items.go` check `strings.Contains(err.Error(), "HTTP 404")` to handle missing pipeline folders gracefully.
 
+- `azuredevops/repositories.go` — **no pagination**: the `_apis/git/repositories` endpoint returns all repos in one call and ignores `$top`/`$skip`. Adding pagination causes an infinite loop (server always returns the same full list). `azuredevops/projects.go` uses real `$top`/`$skip` pagination since large orgs can exceed 100 projects.
+
 - `azuredevops/items.go` — `ListPipelineFolder` calls the Items API with `scopePath=/pipeline&recursionLevel=OneLevel`, then filters results through `pipeline.MatchesPipelineGlob` to find `*.pipeline.yaml` / `*.pipeline.yml` blobs only.
 
 - `pipeline/parser.go` — YAML parsing never returns an error; bad YAML yields an empty `ExtendsPipeline` string. `MatchesPipelineGlob` requires the path to be exactly `/pipeline/<name>` (not nested).
