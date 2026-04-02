@@ -8,5 +8,3 @@ sql:
         package: "db"
         out: "internal/db/generated"
         emit_json_tags: true
-        emit_pointers_for_null_fields: true
-        null_str: "sql"
