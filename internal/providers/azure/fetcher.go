@@ -1,0 +1,172 @@
+package azure
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/oxGrad/deadgit/internal/providers/types"
+)
+
+const apiVersion = "api-version=7.0"
+
+type azureProvider struct {
+	baseURL string
+	client  *client
+}
+
+// New creates an Azure DevOps provider.
+func New(baseURL, pat string) types.Provider {
+	return &azureProvider{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		client:  newClient(pat),
+	}
+}
+
+// --- Azure API response types ---
+
+type azProject struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type azProjectList struct {
+	Value []azProject `json:"value"`
+	Count int         `json:"count"`
+}
+
+type azRepo struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	RemoteURL     string `json:"remoteUrl"`
+	DefaultBranch string `json:"defaultBranch"`
+	IsDisabled    bool   `json:"isDisabled"`
+}
+
+type azRepoList struct {
+	Value []azRepo `json:"value"`
+}
+
+type azCommit struct {
+	CommitID string `json:"commitId"`
+	Author   struct {
+		Date time.Time `json:"date"`
+	} `json:"author"`
+}
+
+type azCommitList struct {
+	Value []azCommit `json:"value"`
+}
+
+type azRef struct {
+	Name string `json:"name"`
+}
+
+type azRefList struct {
+	Value []azRef `json:"value"`
+}
+
+type azPRList struct {
+	Value []struct{} `json:"value"`
+}
+
+// --- Provider implementation ---
+
+func (p *azureProvider) ListProjects(org types.Organization) ([]types.Project, error) {
+	var result []types.Project
+	skip, top := 0, 100
+	for {
+		url := fmt.Sprintf("%s/%s/_apis/projects?$top=%d&$skip=%d&%s",
+			p.baseURL, org.Slug, top, skip, apiVersion)
+		var list azProjectList
+		if err := p.client.get(url, &list); err != nil {
+			return nil, fmt.Errorf("list projects: %w", err)
+		}
+		for _, proj := range list.Value {
+			result = append(result, types.Project{Name: proj.Name, ExternalID: proj.ID})
+		}
+		if len(list.Value) < top {
+			break
+		}
+		skip += top
+	}
+	return result, nil
+}
+
+func (p *azureProvider) FetchRepos(org types.Organization, project types.Project) ([]types.RepoData, error) {
+	url := fmt.Sprintf("%s/%s/%s/_apis/git/repositories?%s",
+		p.baseURL, org.Slug, project.Name, apiVersion)
+	var list azRepoList
+	if err := p.client.get(url, &list); err != nil {
+		return nil, fmt.Errorf("list repos for %s/%s: %w", org.Slug, project.Name, err)
+	}
+
+	var result []types.RepoData
+	for _, repo := range list.Value {
+		data := p.fetchRepoData(org, project, repo)
+		result = append(result, data)
+	}
+	return result, nil
+}
+
+func (p *azureProvider) fetchRepoData(org types.Organization, project types.Project, repo azRepo) types.RepoData {
+	defaultBranch := normalizeBranch(repo.DefaultBranch)
+
+	// Fetch branches
+	branchURL := fmt.Sprintf("%s/%s/%s/_apis/git/repositories/%s/refs?filter=heads/&%s",
+		p.baseURL, org.Slug, project.Name, repo.ID, apiVersion)
+	var refs azRefList
+	p.client.get(branchURL, &refs) // best effort
+
+	// Fetch last commit on default branch
+	var lastCommitAt *time.Time
+	if defaultBranch != "" {
+		commitURL := fmt.Sprintf(
+			"%s/%s/%s/_apis/git/repositories/%s/commits?searchCriteria.itemVersion.version=%s&searchCriteria.$top=1&%s",
+			p.baseURL, org.Slug, project.Name, repo.ID, defaultBranch, apiVersion)
+		var commits azCommitList
+		if err := p.client.get(commitURL, &commits); err == nil && len(commits.Value) > 0 {
+			t := commits.Value[0].Author.Date
+			lastCommitAt = &t
+		}
+	}
+
+	// Fetch 90-day commit count (capped at 1000)
+	since := time.Now().AddDate(0, 0, -90).Format(time.RFC3339)
+	countURL := fmt.Sprintf(
+		"%s/%s/%s/_apis/git/repositories/%s/commits?searchCriteria.fromDate=%s&searchCriteria.$top=1000&%s",
+		p.baseURL, org.Slug, project.Name, repo.ID, since, apiVersion)
+	var recent azCommitList
+	p.client.get(countURL, &recent) // best effort
+
+	// Fetch open PR count
+	prURL := fmt.Sprintf(
+		"%s/%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=active&%s",
+		p.baseURL, org.Slug, project.Name, repo.ID, apiVersion)
+	var prs azPRList
+	p.client.get(prURL, &prs) // best effort
+
+	// Build raw blob
+	blob, _ := json.Marshal(map[string]interface{}{
+		"repo":    repo,
+		"commits": recent,
+		"refs":    refs,
+	})
+
+	return types.RepoData{
+		Name:              repo.Name,
+		RemoteURL:         repo.RemoteURL,
+		ExternalID:        repo.ID,
+		DefaultBranch:     defaultBranch,
+		IsDisabled:        repo.IsDisabled,
+		LastCommitAt:      lastCommitAt,
+		CommitCount90d:    len(recent.Value),
+		ActiveBranchCount: len(refs.Value),
+		RawAPIBlob:        string(blob),
+	}
+}
+
+func normalizeBranch(branch string) string {
+	return strings.TrimPrefix(branch, "refs/heads/")
+}
