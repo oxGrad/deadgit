@@ -1,27 +1,46 @@
 package providers
 
-import (
-	"fmt"
+import "time"
 
-	"github.com/oxGrad/deadgit/internal/providers/azure"
-	"github.com/oxGrad/deadgit/internal/providers/github"
-	"github.com/oxGrad/deadgit/internal/providers/types"
-)
+// Organization mirrors the DB organizations row for provider use.
+type Organization struct {
+	ID          int64
+	Slug        string
+	Name        string
+	Provider    string // "azure" | "github"
+	AccountType string // "org" | "personal"
+	BaseURL     string
+	PatEnv      string
+}
 
-// Re-export shared types so callers import only this package.
-type Organization = types.Organization
-type Project = types.Project
-type RepoData = types.RepoData
-type Provider = types.Provider
+// Project mirrors the DB projects row.
+type Project struct {
+	ID         int64
+	Name       string
+	ExternalID string
+}
 
-// ProviderFor returns the correct Provider for the given org.
-func ProviderFor(org Organization, pat string) (Provider, error) {
-	switch org.Provider {
-	case "azure":
-		return azure.New(org.BaseURL, pat), nil
-	case "github":
-		return github.New(org.BaseURL, pat, org.AccountType), nil
-	default:
-		return nil, fmt.Errorf("unknown provider %q for org %q", org.Provider, org.Slug)
-	}
+// RepoData holds raw API data for one repository.
+// Upserted to DB as-is — no computed values.
+type RepoData struct {
+	Name              string
+	RemoteURL         string
+	ExternalID        string
+	DefaultBranch     string
+	IsArchived        bool
+	IsDisabled        bool
+	LastCommitAt      *time.Time
+	LastPushAt        *time.Time
+	LastPRMergedAt    *time.Time
+	LastPRCreatedAt   *time.Time
+	CommitCount90d    int
+	ActiveBranchCount int
+	ContributorCount  int
+	RawAPIBlob        string
+}
+
+// Provider is the interface both Azure and GitHub fetchers implement.
+type Provider interface {
+	ListProjects(org Organization) ([]Project, error)
+	FetchRepos(org Organization, project Project) ([]RepoData, error)
 }

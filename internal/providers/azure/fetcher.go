@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oxGrad/deadgit/internal/providers/types"
+	"github.com/oxGrad/deadgit/internal/providers"
 )
 
 const apiVersion = "api-version=7.0"
@@ -17,7 +17,7 @@ type azureProvider struct {
 }
 
 // New creates an Azure DevOps provider.
-func New(baseURL, pat string) types.Provider {
+func New(baseURL, pat string) providers.Provider {
 	return &azureProvider{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  newClient(pat),
@@ -73,8 +73,8 @@ type azPRList struct {
 
 // --- Provider implementation ---
 
-func (p *azureProvider) ListProjects(org types.Organization) ([]types.Project, error) {
-	var result []types.Project
+func (p *azureProvider) ListProjects(org providers.Organization) ([]providers.Project, error) {
+	var result []providers.Project
 	skip, top := 0, 100
 	for {
 		url := fmt.Sprintf("%s/%s/_apis/projects?$top=%d&$skip=%d&%s",
@@ -84,7 +84,7 @@ func (p *azureProvider) ListProjects(org types.Organization) ([]types.Project, e
 			return nil, fmt.Errorf("list projects: %w", err)
 		}
 		for _, proj := range list.Value {
-			result = append(result, types.Project{Name: proj.Name, ExternalID: proj.ID})
+			result = append(result, providers.Project{Name: proj.Name, ExternalID: proj.ID})
 		}
 		if len(list.Value) < top {
 			break
@@ -94,7 +94,7 @@ func (p *azureProvider) ListProjects(org types.Organization) ([]types.Project, e
 	return result, nil
 }
 
-func (p *azureProvider) FetchRepos(org types.Organization, project types.Project) ([]types.RepoData, error) {
+func (p *azureProvider) FetchRepos(org providers.Organization, project providers.Project) ([]providers.RepoData, error) {
 	url := fmt.Sprintf("%s/%s/%s/_apis/git/repositories?%s",
 		p.baseURL, org.Slug, project.Name, apiVersion)
 	var list azRepoList
@@ -102,7 +102,7 @@ func (p *azureProvider) FetchRepos(org types.Organization, project types.Project
 		return nil, fmt.Errorf("list repos for %s/%s: %w", org.Slug, project.Name, err)
 	}
 
-	var result []types.RepoData
+	var result []providers.RepoData
 	for _, repo := range list.Value {
 		data := p.fetchRepoData(org, project, repo)
 		result = append(result, data)
@@ -110,7 +110,7 @@ func (p *azureProvider) FetchRepos(org types.Organization, project types.Project
 	return result, nil
 }
 
-func (p *azureProvider) fetchRepoData(org types.Organization, project types.Project, repo azRepo) types.RepoData {
+func (p *azureProvider) fetchRepoData(org providers.Organization, project providers.Project, repo azRepo) providers.RepoData {
 	defaultBranch := normalizeBranch(repo.DefaultBranch)
 
 	// Fetch branches
@@ -154,7 +154,7 @@ func (p *azureProvider) fetchRepoData(org types.Organization, project types.Proj
 		"refs":    refs,
 	})
 
-	return types.RepoData{
+	return providers.RepoData{
 		Name:              repo.Name,
 		RemoteURL:         repo.RemoteURL,
 		ExternalID:        repo.ID,

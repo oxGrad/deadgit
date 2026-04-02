@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/oxGrad/deadgit/internal/providers"
 	"github.com/oxGrad/deadgit/internal/providers/azure"
-	"github.com/oxGrad/deadgit/internal/providers/types"
 )
 
 func TestListProjects_SinglePage(t *testing.T) {
@@ -21,7 +21,7 @@ func TestListProjects_SinglePage(t *testing.T) {
 	defer srv.Close()
 
 	p := azure.New(srv.URL, "token")
-	org := types.Organization{Slug: "myorg", Provider: "azure", BaseURL: srv.URL}
+	org := providers.Organization{Slug: "myorg", Provider: "azure", BaseURL: srv.URL}
 	projects, err := p.ListProjects(org)
 	if err != nil {
 		t.Fatalf("ListProjects: %v", err)
@@ -39,8 +39,8 @@ func TestFetchRepos_Empty(t *testing.T) {
 	defer srv.Close()
 
 	p := azure.New(srv.URL, "token")
-	org := types.Organization{Slug: "myorg", BaseURL: srv.URL}
-	proj := types.Project{Name: "proj", ExternalID: "pid"}
+	org := providers.Organization{Slug: "myorg", BaseURL: srv.URL}
+	proj := providers.Project{Name: "proj", ExternalID: "pid"}
 	repos, err := p.FetchRepos(org, proj)
 	if err != nil {
 		t.Fatalf("FetchRepos: %v", err)
