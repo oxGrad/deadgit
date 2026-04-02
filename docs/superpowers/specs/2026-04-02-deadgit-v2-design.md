@@ -119,6 +119,10 @@ Org accounts use `GET /orgs/{org}/repos`.
 - `pat_token` column **removed** — PAT lives in env vars only
 - `pat_env` column **added** — stores the name of the env var holding the PAT (e.g. `"GITHUB_PAT"`)
 - `account_type` column **added** to `organizations` — `'org'` (default) | `'personal'`
+- `provider` default changed to `'github'`
+- `base_url` default changed to `'https://api.github.com'`
+- `version` column **added** to `scoring_profiles` — profiles are immutable (no delete), only versioned
+- `DeleteProfile` query **removed** — profiles can only be superseded by a new version
 
 ### organizations table (final)
 
@@ -127,10 +131,10 @@ CREATE TABLE IF NOT EXISTS organizations (
   id           INTEGER  PRIMARY KEY AUTOINCREMENT,
   name         TEXT     NOT NULL,
   slug         TEXT     NOT NULL UNIQUE,
-  provider     TEXT     NOT NULL DEFAULT 'azure',   -- 'azure' | 'github'
+  provider     TEXT     NOT NULL DEFAULT 'github',  -- 'azure' | 'github'
   account_type TEXT     NOT NULL DEFAULT 'org',     -- 'org'  | 'personal'
-  base_url     TEXT     NOT NULL DEFAULT 'https://dev.azure.com',
-  pat_env      TEXT     NOT NULL,                   -- env var name, e.g. "MYORG_PAT"
+  base_url     TEXT     NOT NULL DEFAULT 'https://api.github.com',
+  pat_env      TEXT     NOT NULL,                   -- env var name, e.g. "GITHUB_PAT"
   is_active    INTEGER  NOT NULL DEFAULT 1,
   last_synced  DATETIME,
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -138,12 +142,21 @@ CREATE TABLE IF NOT EXISTS organizations (
 ```
 
 The `base_url` column is set automatically by `org add` based on `--provider`:
-- `azure` → `https://dev.azure.com` (default)
-- `github` → `https://api.github.com`
+- `github` → `https://api.github.com` (default)
+- `azure` → `https://dev.azure.com`
 
-`--provider` defaults to `azure` if omitted.
+`--provider` defaults to `github` if omitted.
 
-All other tables (`projects`, `repositories`, `scoring_profiles`, `scoring_profile_history`, `scan_runs`) match PRD-update.md exactly.
+### scoring_profiles table (delta)
+
+`version INTEGER NOT NULL DEFAULT 1` added. Each `profile edit` increments the version and inserts a history row — the profile row itself is updated in place but its version counter increments. Profiles can never be deleted. The `DeleteProfile` SQL query from PRD-update.md is dropped.
+
+```sql
+-- version column added to scoring_profiles
+version INTEGER NOT NULL DEFAULT 1,
+```
+
+All other tables (`projects`, `repositories`, `scoring_profile_history`, `scan_runs`) match PRD-update.md exactly.
 
 ---
 
@@ -170,8 +183,9 @@ deadgit org remove <slug>
 ```bash
 deadgit profile create <name> [weight flags] [--description "..."]
 deadgit profile list
-deadgit profile edit <name> [weight flags]
+deadgit profile edit <name> [weight flags]   # increments version, records history
 deadgit profile set-default <name>
+# note: profile delete is intentionally absent — profiles are immutable/versioned
 ```
 
 Weight flags: `--w-last-commit`, `--w-last-pr`, `--w-commit-freq`, `--w-branch-staleness`, `--w-no-releases`, `--threshold`, `--score-min`
@@ -237,8 +251,10 @@ Hard overrides: archived or disabled repos always score 1.0 (always INACTIVE).
 
 ### Table (default)
 
+Profile name and version are always shown in the header:
+
 ```
-Scan Results  •  Profile: default  •  Orgs: myorg, anotherorg
+Scan Results  •  Profile: default v2  •  Orgs: myorg, anotherorg
 ┌──────────────┬──────────────┬───────────────────┬────────┬────────────┬──────────────────────┐
 │ Org          │ Project      │ Repository        │ Score  │ Status     │ Reasons              │
 ├──────────────┼──────────────┼───────────────────┼────────┼────────────┼──────────────────────┤
@@ -248,11 +264,84 @@ Scan Results  •  Profile: default  •  Orgs: myorg, anotherorg
 Total: 2 repos  •  1 inactive  •  Cached: 1  •  Fetched: 1  •  Duration: 0.82s
 ```
 
+If inline `--w-*` overrides are active, the header shows `Profile: default v2 (overrides active)` to make experimentation visible.
+
 ### JSON / CSV
 
-Full repo metrics + score breakdown written to file. Default filenames:
+Profile name and version included in every output row/document. Default filenames:
 - `deadgit-report-YYYY-MM-DD.json`
 - `deadgit-report-YYYY-MM-DD.csv`
+
+JSON envelope:
+```json
+{
+  "profile": "default",
+  "profile_version": 2,
+  "scanned_at": "2026-04-02T10:00:00Z",
+  "repos": [ ... ]
+}
+```
+
+---
+
+## Interactive Mode
+
+**Library:** `github.com/charmbracelet/huh` — modern, composable form/prompt library that works well with Cobra.
+
+**Principle:** flags/args always take precedence (CI-safe). Interactive prompts activate only when required args or flags are missing and the terminal is a TTY. Scripts and CI pipelines are unaffected.
+
+### `org add` (interactive fallback)
+
+```bash
+# fully non-interactive (CI)
+deadgit org add mycompany --name "My Company" --provider github --pat-env GITHUB_PAT
+
+# interactive: slug provided, rest prompted
+deadgit org add mycompany
+
+# fully interactive: no args
+deadgit org add
+# → prompts: slug, display name, provider (selector), account type (selector), pat-env name
+```
+
+### `profile create` / `profile edit` (interactive fallback)
+
+```bash
+# non-interactive
+deadgit profile create fast --w-last-commit 0.6 --w-last-pr 0.1 ...
+
+# interactive
+deadgit profile create
+# → prompts: name, description, then each weight with current default pre-filled
+```
+
+### `scan` (interactive fallback)
+
+```bash
+# non-interactive
+deadgit scan --org mycompany --profile default
+
+# interactive: no org specified and multiple orgs registered
+deadgit scan
+# → multi-select: choose orgs to scan
+# → selector: choose scoring profile (shows name + version)
+# → confirm refresh? (y/n)
+```
+
+### `profile set-default` (interactive fallback)
+
+```bash
+# non-interactive
+deadgit profile set-default conservative
+
+# interactive
+deadgit profile set-default
+# → selector: list all profiles with version shown, pick one
+```
+
+### TTY detection
+
+Interactive mode is suppressed when stdout is not a TTY (`!term.IsTerminal(int(os.Stdout.Fd()))`). This ensures `deadgit scan | jq` and CI pipelines always behave non-interactively.
 
 ---
 
@@ -272,7 +361,11 @@ Full repo metrics + score breakdown written to file. Default filenames:
 - [ ] All packages under `internal/` and `cmd/`
 - [ ] Migrations embedded via `embed.FS`
 - [ ] sqlc-generated code checked in
-- [ ] `README.md` — full usage guide (commands, env vars, Azure + GitHub examples, scoring profiles)
+- [ ] Interactive mode via `charmbracelet/huh` with TTY detection
+- [ ] Profile versioning — edit increments version, no delete
+- [ ] Profile name + version in all output formats (table header, JSON envelope, CSV column)
+- [ ] GitHub as default provider (`--provider github` default)
+- [ ] `README.md` — full usage guide (commands, env vars, Azure + GitHub examples, scoring profiles, interactive vs CI mode)
 - [ ] `ROADMAP.md` — keyring integration, future provider ideas
 - [ ] Updated `PRD.md` to reflect v2 scope
 - [ ] All existing v1 packages removed
