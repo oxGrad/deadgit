@@ -11,6 +11,9 @@ import (
 	"golang.org/x/term"
 
 	dbgen "github.com/oxGrad/deadgit/internal/db/generated"
+	"github.com/oxGrad/deadgit/internal/providers"
+	"github.com/oxGrad/deadgit/internal/providers/azure"
+	"github.com/oxGrad/deadgit/internal/providers/github"
 )
 
 func isInteractive() bool {
@@ -88,13 +91,37 @@ func runOrgAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("PAT env var %q is not set", orgAddPatEnv)
 	}
 
+	// Validate connectivity before saving to DB
+	baseURL := baseURLForProvider(orgAddProvider)
+	newOrg := providers.Organization{
+		Slug:        slug,
+		Name:        orgAddName,
+		Provider:    orgAddProvider,
+		AccountType: orgAddType,
+		BaseURL:     baseURL,
+		PatEnv:      orgAddPatEnv,
+	}
+	var prov providers.Provider
+	switch strings.ToLower(orgAddProvider) {
+	case "azure":
+		prov = azure.New(baseURL, pat)
+	case "github":
+		prov = github.New(baseURL, pat, orgAddType)
+	default:
+		return fmt.Errorf("unknown provider %q", orgAddProvider)
+	}
+	fmt.Printf("Validating connectivity to %s/%s...\n", baseURL, slug)
+	if _, err := prov.ListProjects(newOrg); err != nil {
+		return fmt.Errorf("connectivity check failed for %q: %w", slug, err)
+	}
+
 	ctx := context.Background()
 	org, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Name:        orgAddName,
 		Slug:        slug,
 		Provider:    orgAddProvider,
 		AccountType: orgAddType,
-		BaseUrl:     baseURLForProvider(orgAddProvider),
+		BaseUrl:     baseURL,
 		PatEnv:      orgAddPatEnv,
 	})
 	if err != nil {
