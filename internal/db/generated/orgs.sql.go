@@ -68,7 +68,7 @@ func (q *Queries) DeleteOrganization(ctx context.Context, slug string) error {
 }
 
 const getOrganizationBySlug = `-- name: GetOrganizationBySlug :one
-SELECT id, name, slug, provider, account_type, base_url, pat_env, is_active, last_synced, created_at FROM organizations WHERE slug = ? LIMIT 1
+SELECT id, name, slug, provider, account_type, base_url, pat_env, is_active, last_synced, created_at FROM organizations WHERE slug = ? AND is_active = 1 LIMIT 1
 `
 
 func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error) {

@@ -4,7 +4,7 @@ VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetOrganizationBySlug :one
-SELECT * FROM organizations WHERE slug = ? LIMIT 1;
+SELECT * FROM organizations WHERE slug = ? AND is_active = 1 LIMIT 1;
 
 -- name: ListOrganizations :many
 SELECT * FROM organizations WHERE is_active = 1 ORDER BY name;
