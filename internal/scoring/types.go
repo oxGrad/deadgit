@@ -13,6 +13,8 @@ type RepoMetrics struct {
 }
 
 // ScoringProfile is a pure value object derived from the DB row.
+// Default weights: WLastCommit=0.50, WLastPR=0.20, WCommitFrequency=0.20,
+// WBranchStaleness=0.10, WNoReleases=0.00 (release data not yet fetched).
 type ScoringProfile struct {
 	Name                   string
 	Version                int

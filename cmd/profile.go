@@ -52,7 +52,7 @@ func runProfileCreate(cmd *cobra.Command, args []string) error {
 		name = args[0]
 	}
 
-	wc, wpr, wf, wb, wr := 0.40, 0.20, 0.20, 0.10, 0.10
+	wc, wpr, wf, wb, wr := 0.50, 0.20, 0.20, 0.10, 0.00
 	thresh, scoreMin := 90, 0.65
 
 	if isInteractive() && name == "" {
@@ -94,6 +94,11 @@ func runProfileCreate(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("create profile: %w", err)
+	}
+	if profileDefault {
+		if err := globalQ.SetDefaultProfile(ctx, name); err != nil {
+			return fmt.Errorf("set default profile: %w", err)
+		}
 	}
 	fmt.Printf("Profile %q created (v%d)\n", p.Name, p.Version)
 	return nil

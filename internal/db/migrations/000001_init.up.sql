@@ -88,6 +88,6 @@ INSERT OR IGNORE INTO scoring_profiles (
   w_branch_staleness, w_no_releases,
   inactive_days_threshold, inactive_score_threshold
 ) VALUES (
-  'default', 'Default balanced scoring profile', 1, 1,
-  0.40, 0.20, 0.20, 0.10, 0.10, 90, 0.65
+  'default', 'Default scoring profile', 1, 1,
+  0.50, 0.20, 0.20, 0.10, 0.00, 90, 0.65
 );
