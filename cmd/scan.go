@@ -70,7 +70,37 @@ func runScan(cmd *cobra.Command, args []string) error {
 	log, _ := zap.NewDevelopment(zap.WithCaller(false))
 	defer log.Sync() //nolint:errcheck
 
-	// 1. Load scoring profile
+	// 1. Load scoring profile — interactive selector if not specified
+	if isInteractive() && scanProfile == "" {
+		profiles, perr := globalQ.ListProfiles(ctx)
+		if perr == nil && len(profiles) > 0 {
+			opts := make([]huh.Option[string], len(profiles))
+			for i, p := range profiles {
+				opts[i] = huh.NewOption(fmt.Sprintf("%s v%d", p.Name, p.Version), p.Name)
+			}
+			var chosenProfile string
+			_ = huh.NewForm(huh.NewGroup(
+				huh.NewSelect[string]().Title("Select scoring profile").Options(opts...).Value(&chosenProfile),
+			)).Run()
+			if chosenProfile != "" {
+				scanProfile = chosenProfile
+			}
+		}
+	}
+
+	// Interactive refresh confirm if not already set
+	if isInteractive() && !scanRefresh {
+		var doRefresh bool
+		_ = huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().
+				Title("Force-refresh data from API? (bypasses cache)").
+				Value(&doRefresh),
+		)).Run()
+		if doRefresh {
+			scanRefresh = true
+		}
+	}
+
 	var dbProfile dbgen.ScoringProfile
 	var err error
 	if scanProfile != "" {
