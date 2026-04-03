@@ -68,7 +68,10 @@ type azRefList struct {
 }
 
 type azPRList struct {
-	Value []struct{} `json:"value"`
+	Value []struct {
+		CreationDate string `json:"creationDate"`
+		Status       string `json:"status"`
+	} `json:"value"`
 }
 
 // --- Provider implementation ---
@@ -140,12 +143,33 @@ func (p *azureProvider) fetchRepoData(org providers.Organization, project provid
 	var recent azCommitList
 	p.client.get(countURL, &recent) // best effort
 
-	// Fetch open PR count
+	// Fetch most recently created PR (any status) to populate LastPRCreatedAt
 	prURL := fmt.Sprintf(
-		"%s/%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=active&%s",
+		"%s/%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=all&$top=1&%s",
 		p.baseURL, org.Slug, project.Name, repo.ID, apiVersion)
 	var prs azPRList
 	p.client.get(prURL, &prs) // best effort
+
+	var lastPRCreatedAt *time.Time
+	if len(prs.Value) > 0 && prs.Value[0].CreationDate != "" {
+		if t, err := time.Parse(time.RFC3339, prs.Value[0].CreationDate); err == nil {
+			lastPRCreatedAt = &t
+		}
+	}
+
+	// Fetch most recently merged PR to populate LastPRMergedAt
+	completedPRURL := fmt.Sprintf(
+		"%s/%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=completed&$top=1&%s",
+		p.baseURL, org.Slug, project.Name, repo.ID, apiVersion)
+	var completedPRs azPRList
+	p.client.get(completedPRURL, &completedPRs) // best effort
+
+	var lastPRMergedAt *time.Time
+	if len(completedPRs.Value) > 0 && completedPRs.Value[0].CreationDate != "" {
+		if t, err := time.Parse(time.RFC3339, completedPRs.Value[0].CreationDate); err == nil {
+			lastPRMergedAt = &t
+		}
+	}
 
 	// Build raw blob
 	blob, _ := json.Marshal(map[string]interface{}{
@@ -161,6 +185,8 @@ func (p *azureProvider) fetchRepoData(org providers.Organization, project provid
 		DefaultBranch:     defaultBranch,
 		IsDisabled:        repo.IsDisabled,
 		LastCommitAt:      lastCommitAt,
+		LastPRCreatedAt:   lastPRCreatedAt,
+		LastPRMergedAt:    lastPRMergedAt,
 		CommitCount90d:    len(recent.Value),
 		ActiveBranchCount: len(refs.Value),
 		RawAPIBlob:        string(blob),
