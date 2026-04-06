@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/oxGrad/deadgit/internal/providers"
@@ -53,10 +54,20 @@ func (p *ghProvider) FetchRepos(org providers.Organization, project providers.Pr
 	if err != nil {
 		return nil, err
 	}
-	result := make([]providers.RepoData, 0, len(repos))
-	for _, repo := range repos {
-		result = append(result, p.fetchRepoData(org, repo))
+	const maxConcurrency = 5
+	result := make([]providers.RepoData, len(repos))
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	for i, repo := range repos {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, r ghRepo) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			result[i] = p.fetchRepoData(org, r)
+		}(i, repo)
 	}
+	wg.Wait()
 	return result, nil
 }
 

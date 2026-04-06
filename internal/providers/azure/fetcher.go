@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oxGrad/deadgit/internal/providers"
@@ -105,11 +106,20 @@ func (p *azureProvider) FetchRepos(org providers.Organization, project providers
 		return nil, fmt.Errorf("list repos for %s/%s: %w", org.Slug, project.Name, err)
 	}
 
-	var result []providers.RepoData
-	for _, repo := range list.Value {
-		data := p.fetchRepoData(org, project, repo)
-		result = append(result, data)
+	const maxConcurrency = 5
+	result := make([]providers.RepoData, len(list.Value))
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	for i, repo := range list.Value {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, r azRepo) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			result[i] = p.fetchRepoData(org, project, r)
+		}(i, repo)
 	}
+	wg.Wait()
 	return result, nil
 }
 

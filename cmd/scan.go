@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -67,8 +69,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 	ctx := context.Background()
 
-	log, _ := zap.NewDevelopment(zap.WithCaller(false))
-	defer log.Sync() //nolint:errcheck
+	log := globalLog
 
 	// 1. Load scoring profile — interactive selector if not specified
 	if isInteractive() && scanProfile == "" {
@@ -140,6 +141,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		stale bool
 	}
 
+	log.Info("scanning orgs", zap.Int("count", len(orgsToScan)))
 	var allEntries []repoEntry
 	for _, org := range orgsToScan {
 		// Initial fetch if org has never been scanned
@@ -152,10 +154,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 			}
 			repos, _ = globalQ.ListRepositoriesByOrg(ctx, org.Slug)
 		}
+		staleCount := 0
 		for _, r := range repos {
 			stale := scanRefresh || cache.IsStale(r.LastFetched, scanTTL)
+			if stale {
+				staleCount++
+			}
 			allEntries = append(allEntries, repoEntry{org: org, repo: r, stale: stale})
 		}
+		log.Info("repos loaded", zap.String("org", org.Slug), zap.Int("total", len(repos)), zap.Int("stale", staleCount))
 	}
 
 	// 6. Refresh stale repos concurrently
@@ -165,6 +172,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 	resultCh := make(chan result, len(allEntries)+1)
 	jobCh := make(chan repoEntry, len(allEntries)+1)
+
+	staleTotal := 0
+	for _, e := range allEntries {
+		if e.stale {
+			staleTotal++
+		}
+	}
+
+	var fetchStarted atomic.Int32
 
 	var wg sync.WaitGroup
 	workers := scanWorkers
@@ -177,11 +193,17 @@ func runScan(cmd *cobra.Command, args []string) error {
 			defer wg.Done()
 			for entry := range jobCh {
 				if entry.stale {
+					n := int(fetchStarted.Add(1))
+					log.Info("fetching repo", zap.String("repo", entry.repo.Name), zap.String("org", entry.org.Slug), zap.Int("progress", n), zap.Int("total", staleTotal))
+					if isInteractive() {
+						printProgress(n, staleTotal, entry.repo.Name)
+					}
 					if rerr := refreshSingleRepo(ctx, entry.org, entry.repo, log); rerr != nil {
 						log.Warn("refresh failed", zap.String("repo", entry.repo.Name), zap.Error(rerr))
 					}
 					resultCh <- result{entry: entry, fetched: true}
 				} else {
+					log.Debug("repo cached, skipping fetch", zap.String("repo", entry.repo.Name))
 					resultCh <- result{entry: entry, fetched: false}
 				}
 			}
@@ -215,6 +237,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 			Cached:     !res.fetched,
 		})
 	}
+	if isInteractive() && staleTotal > 0 {
+		fmt.Fprint(os.Stderr, "\r\033[K") // clear progress line
+	}
 
 	inactiveCount := 0
 	for _, r := range rows {
@@ -222,6 +247,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 			inactiveCount++
 		}
 	}
+	log.Info("scoring complete", zap.Int("repos", len(rows)), zap.Int("inactive", inactiveCount), zap.Int("fetched", fetched), zap.Int("cached", cached))
 
 	orgSlugs := make([]string, len(orgsToScan))
 	for i, o := range orgsToScan {
@@ -323,10 +349,12 @@ func fetchAndStoreAllRepos(ctx context.Context, org dbgen.Organization, log *zap
 		return err
 	}
 	provOrg := dbOrgToProviderOrg(org)
+	log.Debug("listing projects", zap.String("org", org.Slug))
 	projects, err := prov.ListProjects(provOrg)
 	if err != nil {
 		return fmt.Errorf("list projects: %w", err)
 	}
+	log.Debug("projects found", zap.String("org", org.Slug), zap.Int("count", len(projects)))
 	for _, proj := range projects {
 		extID := proj.ExternalID
 		dbProj, err := globalQ.UpsertProject(ctx, dbgen.UpsertProjectParams{
@@ -338,12 +366,15 @@ func fetchAndStoreAllRepos(ctx context.Context, org dbgen.Organization, log *zap
 			log.Warn("upsert project failed", zap.String("project", proj.Name), zap.Error(err))
 			continue
 		}
+		log.Debug("fetching repos", zap.String("org", org.Slug), zap.String("project", proj.Name))
 		repos, err := prov.FetchRepos(provOrg, proj)
 		if err != nil {
 			log.Warn("fetch repos failed", zap.String("project", proj.Name), zap.Error(err))
 			continue
 		}
+		log.Debug("repos fetched", zap.String("project", proj.Name), zap.Int("count", len(repos)))
 		for _, r := range repos {
+			log.Debug("upserting repo", zap.String("repo", r.Name))
 			upsertRepo(ctx, dbProj.ID, r, log)
 		}
 	}
@@ -358,12 +389,15 @@ func refreshSingleRepo(ctx context.Context, org dbgen.Organization, repo dbgen.L
 	}
 	provOrg := dbOrgToProviderOrg(org)
 	proj := providers.Project{Name: repo.ProjectName}
+	log.Debug("fetching project repos for refresh", zap.String("project", repo.ProjectName))
 	repos, err := prov.FetchRepos(provOrg, proj)
 	if err != nil {
 		return err
 	}
+	log.Debug("project repos fetched", zap.String("project", repo.ProjectName), zap.Int("count", len(repos)))
 	for _, r := range repos {
 		if r.Name == repo.Name {
+			log.Debug("found repo, upserting", zap.String("repo", r.Name))
 			upsertRepo(ctx, repo.ProjectID, r, log)
 			break
 		}
@@ -493,6 +527,16 @@ func applyScanOverrides(cmd *cobra.Command, p *scoring.ScoringProfile) bool {
 		changed = true
 	}
 	return changed
+}
+
+func printProgress(done, total int, repoName string) {
+	const barWidth = 20
+	filled := done * barWidth / total
+	bar := "[" + strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled) + "]"
+	if len(repoName) > 40 {
+		repoName = repoName[:37] + "..."
+	}
+	fmt.Fprintf(os.Stderr, "\r  %s  %d/%d  %-40s", bar, done, total, repoName)
 }
 
 func recordScanRun(ctx context.Context, orgID int64, profileID int64, profile scoring.ScoringProfile, total, inactive int) {
