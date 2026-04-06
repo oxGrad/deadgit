@@ -335,8 +335,7 @@ func resolveOrgsToScan(ctx context.Context, cmd *cobra.Command) ([]dbgen.Organiz
 	return nil, nil
 }
 
-// providerFor wires the correct provider implementation.
-func providerFor(org dbgen.Organization) (providers.Provider, error) {
+var providerFor = func(org dbgen.Organization) (providers.Provider, error) {
 	pat := os.Getenv(org.PatEnv)
 	if pat == "" {
 		return nil, fmt.Errorf("PAT env var %q is not set for org %q", org.PatEnv, org.Slug)

@@ -60,3 +60,10 @@ func TestOpen_Idempotent(t *testing.T) {
 		sqlDB.Close() //nolint:errcheck
 	}
 }
+
+func TestOpen_InvalidPath(t *testing.T) {
+	_, err := deaddb.Open("/nonexistent/directory/test.db")
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}

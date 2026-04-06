@@ -16,7 +16,7 @@ import (
 	"github.com/oxGrad/deadgit/internal/providers/github"
 )
 
-func isInteractive() bool {
+var isInteractive = func() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 

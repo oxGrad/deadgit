@@ -245,6 +245,10 @@ func runProfileSetDefault(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("profile name is required")
 	}
 
+	if _, err := globalQ.GetProfileByName(ctx, name); err != nil {
+		return fmt.Errorf("profile %q not found: %w", name, err)
+	}
+
 	if err := globalQ.SetDefaultProfile(ctx, name); err != nil {
 		return err
 	}
