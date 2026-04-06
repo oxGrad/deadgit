@@ -2,6 +2,7 @@
 
 **Repository inactivity scanner for Azure DevOps and GitHub.**
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/oxGrad/deadgit)](https://goreportcard.com/report/github.com/oxGrad/deadgit)
 [![CI](https://github.com/oxGrad/deadgit/actions/workflows/ci.yml/badge.svg)](https://github.com/oxGrad/deadgit/actions/workflows/ci.yml)
 [![Release](https://github.com/oxGrad/deadgit/actions/workflows/release.yml/badge.svg)](https://github.com/oxGrad/deadgit/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
