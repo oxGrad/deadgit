@@ -77,7 +77,11 @@ func runScan(cmd *cobra.Command, args []string) error {
 		if perr == nil && len(profiles) > 0 {
 			opts := make([]huh.Option[string], len(profiles))
 			for i, p := range profiles {
-				opts[i] = huh.NewOption(fmt.Sprintf("%s v%d", p.Name, p.Version), p.Name)
+				label := fmt.Sprintf("%s v%d", p.Name, p.Version)
+				if p.IsDefault == 1 {
+					label += " [default]"
+				}
+				opts[i] = huh.NewOption(label, p.Name)
 			}
 			var chosenProfile string
 			_ = huh.NewForm(huh.NewGroup(
@@ -112,6 +116,10 @@ func runScan(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("load scoring profile: %w", err)
 	}
+	if !isInteractive() && scanProfile == "" {
+		fmt.Fprintf(os.Stderr, "Using default profile %q (use --profile <name> to specify, or run interactively to select)\n", dbProfile.Name)
+	}
+	log.Info("loaded scoring profile", zap.String("name", dbProfile.Name), zap.Int64("version", dbProfile.Version))
 
 	profile := dbProfileToScoringProfile(dbProfile)
 
