@@ -1,6 +1,10 @@
 # deadgit
 
-Repository inactivity scanner for Azure DevOps and GitHub.
+**Repository inactivity scanner for Azure DevOps and GitHub.**
+
+[![CI](https://github.com/oxGrad/deadgit/actions/workflows/ci.yml/badge.svg)](https://github.com/oxGrad/deadgit/actions/workflows/ci.yml)
+[![Release](https://github.com/oxGrad/deadgit/actions/workflows/release.yml/badge.svg)](https://github.com/oxGrad/deadgit/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 deadgit scans repositories across one or more organizations, scores them using configurable weighted metrics, and reports which repos are inactive. Results are cached in a local SQLite database so re-scoring with different profiles is instant.
 
@@ -44,10 +48,10 @@ go install github.com/oxGrad/deadgit@latest
 
 Two global flags are available on every command:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--db` | `~/.deadgit/deadgit.db` | Path to the SQLite database |
-| `--output` | `table` | Output format: `table`, `json`, or `csv` |
+| Flag       | Default                 | Description                              |
+| ---------- | ----------------------- | ---------------------------------------- |
+| `--db`     | `~/.deadgit/deadgit.db` | Path to the SQLite database              |
+| `--output` | `table`                 | Output format: `table`, `json`, or `csv` |
 
 The database is created automatically on first run. Migrations run on startup — no setup required.
 
@@ -87,14 +91,14 @@ deadgit org add
 
 `org add` flags:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--name` | (slug) | Display name |
-| `--provider` | `github` | Provider: `github` or `azure` |
-| `--type` | `org` | Account type: `org` or `personal` |
-| `--pat-env` | (required) | Name of the env var holding the PAT |
+| Flag         | Default    | Description                         |
+| ------------ | ---------- | ----------------------------------- |
+| `--name`     | (slug)     | Display name                        |
+| `--provider` | `github`   | Provider: `github` or `azure`       |
+| `--type`     | `org`      | Account type: `org` or `personal`   |
+| `--pat-env`  | (required) | Name of the env var holding the PAT |
 
-**Note on PAT security:** deadgit never stores the PAT in the database. Only the env var *name* is stored. The PAT is read from the environment at scan time. If the env var is unset, the scan fails with a clear error.
+**Note on PAT security:** deadgit never stores the PAT in the database. Only the env var _name_ is stored. The PAT is read from the environment at scan time. If the env var is unset, the scan fails with a clear error.
 
 ### Listing organizations
 
@@ -148,16 +152,16 @@ deadgit profile create
 
 Weight flags for `profile create` and `profile edit`:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--w-last-commit` | `0.40` | Weight for days since last commit |
-| `--w-last-pr` | `0.20` | Weight for days since last PR |
-| `--w-commit-freq` | `0.20` | Weight for commit frequency over 90 days |
-| `--w-branch-staleness` | `0.10` | Weight for stale branch ratio |
-| `--w-no-releases` | `0.10` | Weight for absence of recent releases |
-| `--threshold` | `90` | Inactive days threshold |
-| `--score-min` | `0.65` | Score at or above which a repo is INACTIVE |
-| `--description` | | Optional description |
+| Flag                   | Default | Description                                |
+| ---------------------- | ------- | ------------------------------------------ |
+| `--w-last-commit`      | `0.40`  | Weight for days since last commit          |
+| `--w-last-pr`          | `0.20`  | Weight for days since last PR              |
+| `--w-commit-freq`      | `0.20`  | Weight for commit frequency over 90 days   |
+| `--w-branch-staleness` | `0.10`  | Weight for stale branch ratio              |
+| `--w-no-releases`      | `0.10`  | Weight for absence of recent releases      |
+| `--threshold`          | `90`    | Inactive days threshold                    |
+| `--score-min`          | `0.65`  | Score at or above which a repo is INACTIVE |
+| `--description`        |         | Optional description                       |
 
 ### Listing profiles
 
@@ -259,15 +263,15 @@ deadgit scan
 
 ### Scan flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `--org` | | Org slug(s) to scan (repeatable) |
-| `--all-orgs` | | Scan all active orgs |
-| `--profile` | (default profile) | Scoring profile name |
-| `--refresh` | `false` | Force re-fetch, bypass cache |
-| `--ttl` | `24` | Cache TTL in hours |
-| `--outfile` | | Output file path (json/csv modes) |
-| `--workers` | `5` | Concurrent workers |
+| Flag         | Default           | Description                       |
+| ------------ | ----------------- | --------------------------------- |
+| `--org`      |                   | Org slug(s) to scan (repeatable)  |
+| `--all-orgs` |                   | Scan all active orgs              |
+| `--profile`  | (default profile) | Scoring profile name              |
+| `--refresh`  | `false`           | Force re-fetch, bypass cache      |
+| `--ttl`      | `24`              | Cache TTL in hours                |
+| `--outfile`  |                   | Output file path (json/csv modes) |
+| `--workers`  | `5`               | Concurrent workers                |
 
 ---
 
@@ -318,8 +322,8 @@ Written to a file (default: `deadgit-report-YYYY-MM-DD.csv`). Includes profile n
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|---|---|---|
+| Variable        | Required      | Description                                                                                            |
+| --------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
 | `<PAT_ENV_VAR>` | Yes (per org) | PAT token for the org. The variable name is configured per-org via `--pat-env` when running `org add`. |
 
 There are no other required environment variables. All configuration is stored in the SQLite database or passed as CLI flags.
