@@ -26,12 +26,12 @@ func TestFetchRepos_OrgAccount(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/orgs/myorg/repos" {
-			json.NewEncoder(w).Encode([]map[string]any{{
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"id": 1, "name": "my-repo", "clone_url": "https://github.com/myorg/my-repo.git",
 				"default_branch": "main", "archived": false, "disabled": false, "pushed_at": "2024-01-01T00:00:00Z",
 			}})
 		} else {
-			json.NewEncoder(w).Encode([]any{})
+			_ = json.NewEncoder(w).Encode([]any{})
 		}
 	}))
 	defer srv.Close()
@@ -51,12 +51,12 @@ func TestFetchRepos_PersonalAccount(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/user/repos" {
-			json.NewEncoder(w).Encode([]map[string]any{{
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"id": 2, "name": "personal-repo", "clone_url": "https://github.com/user/personal-repo.git",
 				"default_branch": "main", "archived": false, "disabled": false, "pushed_at": "2024-06-01T00:00:00Z",
 			}})
 		} else {
-			json.NewEncoder(w).Encode([]any{})
+			_ = json.NewEncoder(w).Encode([]any{})
 		}
 	}))
 	defer srv.Close()

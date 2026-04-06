@@ -39,7 +39,7 @@ func PrintTable(w io.Writer, rows []RepoRow, opts TableOptions) {
 	if opts.HasOverrides {
 		profileLabel += " (overrides active)"
 	}
-	fmt.Fprintf(w, "\nScan Results  •  Profile: %s  •  Orgs: %s\n",
+	fmt.Fprintf(w, "\nScan Results  •  Profile: %s  •  Orgs: %s\n", //nolint:errcheck
 		profileLabel, strings.Join(opts.OrgSlugs, ", "))
 
 	tbl := tablewriter.NewTable(w)
@@ -53,7 +53,7 @@ func PrintTable(w io.Writer, rows []RepoRow, opts TableOptions) {
 		if r.IsInactive {
 			status = inactive("⚠ INACTIVE")
 		}
-		tbl.Append([]string{
+		tbl.Append([]string{ //nolint:errcheck
 			r.OrgSlug,
 			r.Project,
 			r.Repo,
@@ -62,8 +62,8 @@ func PrintTable(w io.Writer, rows []RepoRow, opts TableOptions) {
 			strings.Join(r.Reasons, "; "),
 		})
 	}
-	tbl.Render()
+	tbl.Render() //nolint:errcheck
 
-	fmt.Fprintf(w, "Total: %d repos  •  %d inactive  •  Cached: %d  •  Fetched: %d  •  Duration: %.2fs\n",
+	fmt.Fprintf(w, "Total: %d repos  •  %d inactive  •  Cached: %d  •  Fetched: %d  •  Duration: %.2fs\n", //nolint:errcheck
 		opts.TotalRepos, opts.InactiveCount, opts.CachedCount, opts.FetchedCount, opts.DurationSec)
 }

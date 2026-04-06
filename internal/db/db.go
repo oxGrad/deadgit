@@ -32,7 +32,7 @@ func Open(path string) (*sql.DB, error) {
 	}
 	sqlDB.SetMaxOpenConns(1) // SQLite is single-writer
 	if err := runMigrations(sqlDB); err != nil {
-		sqlDB.Close()
+		sqlDB.Close() //nolint:errcheck
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 	return sqlDB, nil

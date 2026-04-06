@@ -130,7 +130,7 @@ func (p *azureProvider) fetchRepoData(org providers.Organization, project provid
 	branchURL := fmt.Sprintf("%s/%s/%s/_apis/git/repositories/%s/refs?filter=heads/&%s",
 		p.baseURL, org.Slug, project.Name, repo.ID, apiVersion)
 	var refs azRefList
-	p.client.get(branchURL, &refs) // best effort
+	p.client.get(branchURL, &refs) //nolint:errcheck // best effort
 
 	// Fetch last commit on default branch
 	var lastCommitAt *time.Time
@@ -151,14 +151,14 @@ func (p *azureProvider) fetchRepoData(org providers.Organization, project provid
 		"%s/%s/%s/_apis/git/repositories/%s/commits?searchCriteria.fromDate=%s&searchCriteria.$top=1000&%s",
 		p.baseURL, org.Slug, project.Name, repo.ID, since, apiVersion)
 	var recent azCommitList
-	p.client.get(countURL, &recent) // best effort
+	p.client.get(countURL, &recent) //nolint:errcheck // best effort
 
 	// Fetch most recently created PR (any status) to populate LastPRCreatedAt
 	prURL := fmt.Sprintf(
 		"%s/%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=all&$top=1&%s",
 		p.baseURL, org.Slug, project.Name, repo.ID, apiVersion)
 	var prs azPRList
-	p.client.get(prURL, &prs) // best effort
+	p.client.get(prURL, &prs) //nolint:errcheck // best effort
 
 	var lastPRCreatedAt *time.Time
 	if len(prs.Value) > 0 && prs.Value[0].CreationDate != "" {
@@ -172,7 +172,7 @@ func (p *azureProvider) fetchRepoData(org providers.Organization, project provid
 		"%s/%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.status=completed&$top=1&%s",
 		p.baseURL, org.Slug, project.Name, repo.ID, apiVersion)
 	var completedPRs azPRList
-	p.client.get(completedPRURL, &completedPRs) // best effort
+	p.client.get(completedPRURL, &completedPRs) //nolint:errcheck // best effort
 
 	var lastPRMergedAt *time.Time
 	if len(completedPRs.Value) > 0 && completedPRs.Value[0].CreationDate != "" {

@@ -9,12 +9,16 @@ import (
 )
 
 // WriteCSV writes rows as CSV to path. Profile name+version appear as columns on every row.
-func WriteCSV(path string, rows []RepoRow, profileName string, profileVersion int) error {
+func WriteCSV(path string, rows []RepoRow, profileName string, profileVersion int) (err error) {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	w := csv.NewWriter(f)
 	defer w.Flush()

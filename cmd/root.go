@@ -44,7 +44,9 @@ func Execute() {
 		os.Exit(1)
 	}
 	if globalDB != nil {
-		globalDB.Close()
+		if err := globalDB.Close(); err != nil {
+			globalLog.Error("close database", zap.Error(err))
+		}
 	}
 }
 

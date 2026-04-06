@@ -69,7 +69,7 @@ func (c *client) doRequest(url string) ([]byte, bool, error) {
 	if err != nil {
 		return nil, true, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusTooManyRequests {
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
