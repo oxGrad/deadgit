@@ -17,7 +17,7 @@ func Test429Retry(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"value":[]}`))
+		w.Write([]byte(`{"value":[]}`)) //nolint:errcheck
 	}))
 	defer srv.Close()
 

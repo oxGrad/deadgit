@@ -15,7 +15,7 @@ type JSONReport struct {
 }
 
 // WriteJSON writes rows as pretty-printed JSON to path with profile metadata envelope.
-func WriteJSON(path string, rows []RepoRow, profileName string, profileVersion int) error {
+func WriteJSON(path string, rows []RepoRow, profileName string, profileVersion int) (err error) {
 	report := JSONReport{
 		Profile:        profileName,
 		ProfileVersion: profileVersion,
@@ -26,7 +26,11 @@ func WriteJSON(path string, rows []RepoRow, profileName string, profileVersion i
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)

@@ -14,7 +14,7 @@ func TestOpen_RunsMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer sqlDB.Close()
+	defer sqlDB.Close() //nolint:errcheck
 
 	var n int
 	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = 1`).Scan(&n); err != nil {
@@ -31,7 +31,7 @@ func TestOpen_DefaultProfileExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer sqlDB.Close()
+	defer sqlDB.Close() //nolint:errcheck
 
 	q := dbgen.New(sqlDB)
 	ctx := t.Context()
@@ -57,6 +57,13 @@ func TestOpen_Idempotent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Open attempt %d: %v", i, err)
 		}
-		sqlDB.Close()
+		sqlDB.Close() //nolint:errcheck
+	}
+}
+
+func TestOpen_InvalidPath(t *testing.T) {
+	_, err := deaddb.Open("/nonexistent/directory/test.db")
+	if err == nil {
+		t.Error("expected error for invalid path")
 	}
 }

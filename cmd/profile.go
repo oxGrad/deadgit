@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/charmbracelet/huh"
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 
 	dbgen "github.com/oxGrad/deadgit/internal/db/generated"
@@ -109,15 +112,31 @@ func runProfileList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if len(profiles) == 0 {
+		fmt.Println("No scoring profiles found.")
+		return nil
+	}
+	tbl := tablewriter.NewTable(os.Stdout)
+	tbl.Header([]string{"Name", "Ver", "Commit", "PR", "Freq", "Branch", "Release", "Threshold", "Score Min", "Default"}) //nolint:errcheck
 	for _, p := range profiles {
 		def := ""
 		if p.IsDefault == 1 {
-			def = " [default]"
+			def = "✓"
 		}
-		fmt.Printf("  %-20s v%-3d  commit=%.2f pr=%.2f freq=%.2f branch=%.2f release=%.2f  threshold=%dd%s\n",
-			p.Name, p.Version, p.WLastCommit, p.WLastPr, p.WCommitFrequency, p.WBranchStaleness, p.WNoReleases,
-			p.InactiveDaysThreshold, def)
+		tbl.Append([]string{ //nolint:errcheck
+			p.Name,
+			strconv.FormatInt(p.Version, 10),
+			fmt.Sprintf("%.2f", p.WLastCommit),
+			fmt.Sprintf("%.2f", p.WLastPr),
+			fmt.Sprintf("%.2f", p.WCommitFrequency),
+			fmt.Sprintf("%.2f", p.WBranchStaleness),
+			fmt.Sprintf("%.2f", p.WNoReleases),
+			fmt.Sprintf("%dd", p.InactiveDaysThreshold),
+			fmt.Sprintf("%.2f", p.InactiveScoreThreshold),
+			def,
+		})
 	}
+	tbl.Render() //nolint:errcheck
 	return nil
 }
 
@@ -224,6 +243,10 @@ func runProfileSetDefault(cmd *cobra.Command, args []string) error {
 	}
 	if name == "" {
 		return fmt.Errorf("profile name is required")
+	}
+
+	if _, err := globalQ.GetProfileByName(ctx, name); err != nil {
+		return fmt.Errorf("profile %q not found: %w", name, err)
 	}
 
 	if err := globalQ.SetDefaultProfile(ctx, name); err != nil {

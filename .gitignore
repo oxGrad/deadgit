@@ -1,3 +1,5 @@
 secret.just
 bin/
 deadgit
+*.db
+coverage.out
