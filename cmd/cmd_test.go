@@ -128,10 +128,13 @@ func TestUpsertRepo_CreatesEntry(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
 
-	org, _ := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	org, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Name: "upsert-org", Slug: "upsert-org", Provider: "github",
 		AccountType: "org", BaseUrl: "https://api.github.com", PatEnv: "PAT",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	proj, _ := globalQ.UpsertProject(ctx, dbgen.UpsertProjectParams{OrgID: org.ID, Name: "proj"})
 
 	now := time.Now()
@@ -158,10 +161,13 @@ func TestRecordScanRun_Inserts(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
 
-	org, _ := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	org, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Name: "run-org", Slug: "run-org", Provider: "github",
 		AccountType: "org", BaseUrl: "https://api.github.com", PatEnv: "PAT",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	profile, _ := globalQ.GetDefaultProfile(ctx)
 
 	recordScanRun(ctx, org.ID, profile.ID, dbProfileToScoringProfile(profile), 5, 2)
@@ -643,10 +649,13 @@ func TestRunScan_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Setup org
-	org, _ := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	org, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Name: "scan-org", Slug: "scan-org", Provider: "github",
 		AccountType: "org", BaseUrl: "https://api.github.com", PatEnv: "PAT",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// 2. Setup mock provider
 	now := time.Now()
@@ -695,9 +704,11 @@ func TestRunScan_NoOrgs(t *testing.T) {
 func TestRunScan_OutputJSON(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	if _, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "json-org", Provider: "github", PatEnv: "PAT",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	mockP := &mockProvider{
 		projects: []providers.Project{{Name: "p1"}},
 		repos:    map[string][]providers.RepoData{"p1": {{Name: "r1"}}},
@@ -723,9 +734,11 @@ func TestRunScan_OutputJSON(t *testing.T) {
 func TestRunScan_OutputCSV(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	if _, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "csv-org", Provider: "github", PatEnv: "PAT",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	mockP := &mockProvider{
 		projects: []providers.Project{{Name: "p1"}},
 		repos:    map[string][]providers.RepoData{"p1": {{Name: "r1"}}},
@@ -751,9 +764,11 @@ func TestRunScan_OutputCSV(t *testing.T) {
 func TestRunScan_InitialFetch(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	if _, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "init-org", Provider: "github", PatEnv: "PAT",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	
 	// No repos in DB initially for this org
 	mockP := &mockProvider{
@@ -792,9 +807,12 @@ func TestRunScan_UnknownProfile(t *testing.T) {
 func TestRunScan_RefreshCached(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	org, _ := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	org, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "cached-org", Provider: "github", PatEnv: "PAT",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	proj, _ := globalQ.UpsertProject(ctx, dbgen.UpsertProjectParams{OrgID: org.ID, Name: "p1"})
 	
 	// Create repo that is NOT stale
@@ -822,12 +840,16 @@ func TestRunScan_RefreshCached(t *testing.T) {
 func TestRunScan_AllOrgs(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	if _, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "org-a", Provider: "github", PatEnv: "PAT",
-	})
-	globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "org-b", Provider: "github", PatEnv: "PAT",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	
 	mockP := &mockProvider{
 		projects: []providers.Project{{Name: "p"}},
@@ -873,9 +895,11 @@ func TestRunScan_ProfileError(t *testing.T) {
 func TestRunScan_WeightWarning(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	if _, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "warn-org", Provider: "github", PatEnv: "PAT",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	mockP := &mockProvider{
 		projects: []providers.Project{{Name: "p1"}},
 		repos:    map[string][]providers.RepoData{"p1": {{Name: "r1"}}},
@@ -924,9 +948,12 @@ func TestRunOrgAdd_Success(t *testing.T) {
 func TestFetchAndStoreAllRepos(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	org, _ := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	org, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "fetch-org", Provider: "github", PatEnv: "PAT",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	mockP := &mockProvider{
 		projects: []providers.Project{{Name: "p1"}},
 		repos:    map[string][]providers.RepoData{"p1": {{Name: "r1"}}},
@@ -948,9 +975,12 @@ func TestFetchAndStoreAllRepos(t *testing.T) {
 func TestRefreshSingleRepo(t *testing.T) {
 	setupTestDB(t)
 	ctx := context.Background()
-	org, _ := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
+	org, err := globalQ.CreateOrganization(ctx, dbgen.CreateOrganizationParams{
 		Slug: "refresh-org", Provider: "github", PatEnv: "PAT",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	proj, _ := globalQ.UpsertProject(ctx, dbgen.UpsertProjectParams{OrgID: org.ID, Name: "p1"})
 	_, _ = globalQ.UpsertRepository(ctx, dbgen.UpsertRepositoryParams{ProjectID: proj.ID, Name: "r1"})
 
