@@ -10,6 +10,13 @@ import (
 	"database/sql"
 )
 
+const deleteProfile = `DELETE FROM scoring_profiles WHERE name = ?`
+
+func (q *Queries) DeleteProfile(ctx context.Context, name string) error {
+	_, err := q.db.ExecContext(ctx, deleteProfile, name)
+	return err
+}
+
 const createScoringProfile = `-- name: CreateScoringProfile :one
 INSERT INTO scoring_profiles (
   name, description, is_default,
