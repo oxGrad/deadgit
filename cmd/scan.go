@@ -8,20 +8,15 @@ import (
 	"math"
 	"os"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 
-	"github.com/oxGrad/deadgit/internal/cache"
 	dbgen "github.com/oxGrad/deadgit/internal/db/generated"
 	"github.com/oxGrad/deadgit/internal/output"
-	"github.com/oxGrad/deadgit/internal/providers"
-	"github.com/oxGrad/deadgit/internal/providers/azure"
-	"github.com/oxGrad/deadgit/internal/providers/github"
+	"github.com/oxGrad/deadgit/internal/scanner"
 	"github.com/oxGrad/deadgit/internal/scoring"
 )
 
@@ -48,12 +43,15 @@ var (
 	scanScoreMin  float64 = -1
 )
 
+// providerFor is a package-level var so tests can swap it out.
+var providerFor scanner.ProviderFunc = scanner.DefaultProviderFor
+
 func init() {
 	scanCmd.Flags().StringSliceVar(&scanOrgs, "org", nil, "Org slugs to scan (repeatable)")
 	scanCmd.Flags().BoolVar(&scanAllOrgs, "all-orgs", false, "Scan all active orgs")
 	scanCmd.Flags().StringVar(&scanProfile, "profile", "", "Scoring profile (default if omitted)")
 	scanCmd.Flags().BoolVar(&scanRefresh, "refresh", false, "Force re-fetch ignoring cache")
-	scanCmd.Flags().IntVar(&scanTTL, "ttl", cache.DefaultTTLHours, "Cache TTL in hours")
+	scanCmd.Flags().IntVar(&scanTTL, "ttl", 24, "Cache TTL in hours")
 	scanCmd.Flags().StringVar(&scanOutFile, "outfile", "", "Output file (json/csv modes)")
 	scanCmd.Flags().IntVar(&scanWorkers, "workers", 5, "Concurrent workers")
 	scanCmd.Flags().Float64Var(&scanWCommit, "w-last-commit", -1, "Override: last commit weight")
@@ -68,10 +66,9 @@ func init() {
 func runScan(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 	ctx := context.Background()
-
 	log := globalLog
 
-	// 1. Load scoring profile — interactive selector if not specified
+	// 1. Interactive profile selection
 	if isInteractive() && scanProfile == "" {
 		profiles, perr := globalQ.ListProfiles(ctx)
 		if perr == nil && len(profiles) > 0 {
@@ -83,29 +80,28 @@ func runScan(cmd *cobra.Command, args []string) error {
 				}
 				opts[i] = huh.NewOption(label, p.Name)
 			}
-			var chosenProfile string
+			var chosen string
 			_ = huh.NewForm(huh.NewGroup(
-				huh.NewSelect[string]().Title("Select scoring profile").Options(opts...).Value(&chosenProfile),
+				huh.NewSelect[string]().Title("Select scoring profile").Options(opts...).Value(&chosen),
 			)).Run()
-			if chosenProfile != "" {
-				scanProfile = chosenProfile
+			if chosen != "" {
+				scanProfile = chosen
 			}
 		}
 	}
 
-	// Interactive refresh confirm if not already set
+	// 2. Interactive refresh confirm
 	if isInteractive() && !scanRefresh {
 		var doRefresh bool
 		_ = huh.NewForm(huh.NewGroup(
-			huh.NewConfirm().
-				Title("Force-refresh data from API? (bypasses cache)").
-				Value(&doRefresh),
+			huh.NewConfirm().Title("Force-refresh data from API? (bypasses cache)").Value(&doRefresh),
 		)).Run()
 		if doRefresh {
 			scanRefresh = true
 		}
 	}
 
+	// 3. Load scoring profile
 	var dbProfile dbgen.ScoringProfile
 	var err error
 	if scanProfile != "" {
@@ -117,23 +113,21 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load scoring profile: %w", err)
 	}
 	if !isInteractive() && scanProfile == "" {
-		fmt.Fprintf(os.Stderr, "Using default profile %q (use --profile <name> to specify, or run interactively to select)\n", dbProfile.Name)
+		fmt.Fprintf(os.Stderr, "Using default profile %q\n", dbProfile.Name)
 	}
-	log.Info("loaded scoring profile", zap.String("name", dbProfile.Name), zap.Int64("version", dbProfile.Version))
+	log.Info("loaded scoring profile", zap.String("name", dbProfile.Name))
 
-	profile := dbProfileToScoringProfile(dbProfile)
-
-	// 2. Apply inline overrides (in-memory only, never saved)
+	profile := scanner.DBProfileToScoringProfile(dbProfile)
 	hasOverrides := applyScanOverrides(cmd, &profile)
 
-	// 3. Warn if weights don't sum to ~1.0
+	// 4. Weight sum warning
 	wSum := profile.WLastCommit + profile.WLastPR + profile.WCommitFrequency +
 		profile.WBranchStaleness + profile.WNoReleases
 	if math.Abs(wSum-1.0) > 0.01 {
 		fmt.Fprintf(os.Stderr, "warning: weights sum to %.4f (expected ~1.0)\n", wSum)
 	}
 
-	// 4. Resolve orgs to scan
+	// 5. Resolve orgs
 	orgsToScan, err := resolveOrgsToScan(ctx, cmd)
 	if err != nil {
 		return err
@@ -142,132 +136,44 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no orgs to scan — use --org <slug>, --all-orgs, or run interactively")
 	}
 
-	// 5. For each org, ensure data exists and refresh stale repos
-	type repoEntry struct {
-		org   dbgen.Organization
-		repo  dbgen.ListRepositoriesByOrgRow
-		stale bool
+	// 6. Run scan
+	cfg := scanner.Config{
+		Orgs:    orgsToScan,
+		Profile: profile,
+		Workers: scanWorkers,
+		TTL:     scanTTL,
+		Refresh: scanRefresh,
 	}
 
-	log.Info("scanning orgs", zap.Int("count", len(orgsToScan)))
-	var allEntries []repoEntry
-	for _, org := range orgsToScan {
-		// Initial fetch if org has never been scanned
-		repos, err := globalQ.ListRepositoriesByOrg(ctx, org.Slug)
-		if err != nil || len(repos) == 0 {
-			log.Info("initial fetch", zap.String("org", org.Slug))
-			if ferr := fetchAndStoreAllRepos(ctx, org, log); ferr != nil {
-				log.Error("initial fetch failed", zap.String("org", org.Slug), zap.Error(ferr))
-				continue
-			}
-			repos, _ = globalQ.ListRepositoriesByOrg(ctx, org.Slug)
-		}
-		staleCount := 0
-		for _, r := range repos {
-			stale := scanRefresh || cache.IsStale(r.LastFetched, scanTTL)
-			if stale {
-				staleCount++
-			}
-			allEntries = append(allEntries, repoEntry{org: org, repo: r, stale: stale})
-		}
-		log.Info("repos loaded", zap.String("org", org.Slug), zap.Int("total", len(repos)), zap.Int("stale", staleCount))
+	var progressFn scanner.ProgressFunc
+	if isInteractive() {
+		progressFn = printProgress
 	}
 
-	// 6. Refresh stale repos concurrently
-	type result struct {
-		entry   repoEntry
-		fetched bool
+	rows, inactiveCount, scanErr := scanner.Run(ctx, globalQ, cfg, providerFor, progressFn)
+	if isInteractive() {
+		fmt.Fprint(os.Stderr, "\r\033[K")
 	}
-	resultCh := make(chan result, len(allEntries)+1)
-	jobCh := make(chan repoEntry, len(allEntries)+1)
-
-	staleTotal := 0
-	for _, e := range allEntries {
-		if e.stale {
-			staleTotal++
-		}
+	if scanErr != nil && scanErr != context.Canceled {
+		return scanErr
 	}
 
-	var fetchStarted atomic.Int32
-
-	var wg sync.WaitGroup
-	workers := scanWorkers
-	if workers < 1 {
-		workers = 1
-	}
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for entry := range jobCh {
-				if entry.stale {
-					n := int(fetchStarted.Add(1))
-					log.Info("fetching repo", zap.String("repo", entry.repo.Name), zap.String("org", entry.org.Slug), zap.Int("progress", n), zap.Int("total", staleTotal))
-					if isInteractive() {
-						printProgress(n, staleTotal, entry.repo.Name)
-					}
-					if rerr := refreshSingleRepo(ctx, entry.org, entry.repo, log); rerr != nil {
-						log.Warn("refresh failed", zap.String("repo", entry.repo.Name), zap.Error(rerr))
-					}
-					resultCh <- result{entry: entry, fetched: true}
-				} else {
-					log.Debug("repo cached, skipping fetch", zap.String("repo", entry.repo.Name))
-					resultCh <- result{entry: entry, fetched: false}
-				}
-			}
-		}()
-	}
-	for _, e := range allEntries {
-		jobCh <- e
-	}
-	close(jobCh)
-	go func() { wg.Wait(); close(resultCh) }()
-
-	// 7. Collect and score
-	var rows []output.RepoRow
-	cached, fetched := 0, 0
-	for res := range resultCh {
-		if res.fetched {
-			fetched++
-		} else {
-			cached++
-		}
-		r := res.entry.repo
-		metrics := repoRowToMetrics(r)
-		sr := scoring.Score(metrics, profile)
-		rows = append(rows, output.RepoRow{
-			OrgSlug:    res.entry.org.Slug,
-			Project:    r.ProjectName,
-			Repo:       r.Name,
-			Score:      sr.TotalScore,
-			IsInactive: sr.IsInactive,
-			Reasons:    sr.Reasons,
-			Cached:     !res.fetched,
-		})
-	}
-	if isInteractive() && staleTotal > 0 {
-		fmt.Fprint(os.Stderr, "\r\033[K") // clear progress line
-	}
-
-	inactiveCount := 0
-	for _, r := range rows {
-		if r.IsInactive {
-			inactiveCount++
-		}
-	}
-	log.Info("scoring complete", zap.Int("repos", len(rows)), zap.Int("inactive", inactiveCount), zap.Int("fetched", fetched), zap.Int("cached", cached))
+	log.Info("scoring complete",
+		zap.Int("repos", len(rows)),
+		zap.Int("inactive", inactiveCount),
+	)
 
 	orgSlugs := make([]string, len(orgsToScan))
 	for i, o := range orgsToScan {
 		orgSlugs[i] = o.Slug
 	}
 
-	// 8. Record scan run for each org
+	// 7. Record scan run
 	for _, org := range orgsToScan {
 		recordScanRun(ctx, org.ID, dbProfile.ID, profile, len(rows), inactiveCount)
 	}
 
-	// 9. Render
+	// 8. Render
 	today := time.Now().Format("2006-01-02")
 	switch outputFmt {
 	case "json":
@@ -290,15 +196,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 			HasOverrides:   hasOverrides,
 			TotalRepos:     len(rows),
 			InactiveCount:  inactiveCount,
-			CachedCount:    cached,
-			FetchedCount:   fetched,
 			DurationSec:    time.Since(start).Seconds(),
 		})
 	}
 	return nil
 }
 
-// resolveOrgsToScan returns orgs from --org flags, --all-orgs, or interactive picker.
 func resolveOrgsToScan(ctx context.Context, cmd *cobra.Command) ([]dbgen.Organization, error) {
 	if scanAllOrgs {
 		return globalQ.ListOrganizations(ctx)
@@ -333,174 +236,6 @@ func resolveOrgsToScan(ctx context.Context, cmd *cobra.Command) ([]dbgen.Organiz
 		return resolveOrgsToScan(ctx, cmd)
 	}
 	return nil, nil
-}
-
-var providerFor = func(org dbgen.Organization) (providers.Provider, error) {
-	pat := os.Getenv(org.PatEnv)
-	if pat == "" {
-		return nil, fmt.Errorf("PAT env var %q is not set for org %q", org.PatEnv, org.Slug)
-	}
-	switch org.Provider {
-	case "azure":
-		return azure.New(org.BaseUrl, pat), nil
-	case "github":
-		return github.New(org.BaseUrl, pat, org.AccountType), nil
-	default:
-		return nil, fmt.Errorf("unknown provider %q", org.Provider)
-	}
-}
-
-func fetchAndStoreAllRepos(ctx context.Context, org dbgen.Organization, log *zap.Logger) error {
-	prov, err := providerFor(org)
-	if err != nil {
-		return err
-	}
-	provOrg := dbOrgToProviderOrg(org)
-	log.Debug("listing projects", zap.String("org", org.Slug))
-	projects, err := prov.ListProjects(provOrg)
-	if err != nil {
-		return fmt.Errorf("list projects: %w", err)
-	}
-	log.Debug("projects found", zap.String("org", org.Slug), zap.Int("count", len(projects)))
-	for _, proj := range projects {
-		extID := proj.ExternalID
-		dbProj, err := globalQ.UpsertProject(ctx, dbgen.UpsertProjectParams{
-			OrgID:      org.ID,
-			Name:       proj.Name,
-			ExternalID: sql.NullString{String: extID, Valid: extID != ""},
-		})
-		if err != nil {
-			log.Warn("upsert project failed", zap.String("project", proj.Name), zap.Error(err))
-			continue
-		}
-		log.Debug("fetching repos", zap.String("org", org.Slug), zap.String("project", proj.Name))
-		repos, err := prov.FetchRepos(provOrg, proj)
-		if err != nil {
-			log.Warn("fetch repos failed", zap.String("project", proj.Name), zap.Error(err))
-			continue
-		}
-		log.Debug("repos fetched", zap.String("project", proj.Name), zap.Int("count", len(repos)))
-		for _, r := range repos {
-			log.Debug("upserting repo", zap.String("repo", r.Name))
-			upsertRepo(ctx, dbProj.ID, r, log)
-		}
-	}
-	_ = globalQ.UpdateOrganizationLastSynced(ctx, org.ID)
-	return nil
-}
-
-func refreshSingleRepo(ctx context.Context, org dbgen.Organization, repo dbgen.ListRepositoriesByOrgRow, log *zap.Logger) error {
-	prov, err := providerFor(org)
-	if err != nil {
-		return err
-	}
-	provOrg := dbOrgToProviderOrg(org)
-	proj := providers.Project{Name: repo.ProjectName}
-	log.Debug("fetching project repos for refresh", zap.String("project", repo.ProjectName))
-	repos, err := prov.FetchRepos(provOrg, proj)
-	if err != nil {
-		return err
-	}
-	log.Debug("project repos fetched", zap.String("project", repo.ProjectName), zap.Int("count", len(repos)))
-	for _, r := range repos {
-		if r.Name == repo.Name {
-			log.Debug("found repo, upserting", zap.String("repo", r.Name))
-			upsertRepo(ctx, repo.ProjectID, r, log)
-			break
-		}
-	}
-	return nil
-}
-
-func upsertRepo(ctx context.Context, projectID int64, r providers.RepoData, log *zap.Logger) {
-	toNullTime := func(t *time.Time) sql.NullTime {
-		if t == nil {
-			return sql.NullTime{}
-		}
-		return sql.NullTime{Valid: true, Time: *t}
-	}
-	toNullInt64 := func(v int) sql.NullInt64 {
-		return sql.NullInt64{Valid: true, Int64: int64(v)}
-	}
-	_, err := globalQ.UpsertRepository(ctx, dbgen.UpsertRepositoryParams{
-		ProjectID:         projectID,
-		Name:              r.Name,
-		RemoteUrl:         r.RemoteURL,
-		ExternalID:        sql.NullString{String: r.ExternalID, Valid: r.ExternalID != ""},
-		DefaultBranch:     sql.NullString{String: r.DefaultBranch, Valid: r.DefaultBranch != ""},
-		IsArchived:        boolToInt64(r.IsArchived),
-		IsDisabled:        boolToInt64(r.IsDisabled),
-		LastCommitAt:      toNullTime(r.LastCommitAt),
-		LastPushAt:        toNullTime(r.LastPushAt),
-		LastPrMergedAt:    toNullTime(r.LastPRMergedAt),
-		LastPrCreatedAt:   toNullTime(r.LastPRCreatedAt),
-		CommitCount90d:    toNullInt64(r.CommitCount90d),
-		ActiveBranchCount: toNullInt64(r.ActiveBranchCount),
-		ContributorCount:  toNullInt64(r.ContributorCount),
-		RawApiBlob:        sql.NullString{String: r.RawAPIBlob, Valid: r.RawAPIBlob != ""},
-	})
-	if err != nil {
-		log.Warn("upsert repo failed", zap.String("repo", r.Name), zap.Error(err))
-	}
-}
-
-func boolToInt64(b bool) int64 {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-func dbOrgToProviderOrg(o dbgen.Organization) providers.Organization {
-	return providers.Organization{
-		ID:          o.ID,
-		Slug:        o.Slug,
-		Name:        o.Name,
-		Provider:    o.Provider,
-		AccountType: o.AccountType,
-		BaseURL:     o.BaseUrl,
-		PatEnv:      o.PatEnv,
-	}
-}
-
-func repoRowToMetrics(r dbgen.ListRepositoriesByOrgRow) scoring.RepoMetrics {
-	daysSince := func(t sql.NullTime) float64 {
-		if !t.Valid {
-			return 9999
-		}
-		return time.Since(t.Time).Hours() / 24
-	}
-	commitCount := int64(0)
-	if r.CommitCount90d.Valid {
-		commitCount = r.CommitCount90d.Int64
-	}
-	branchCount := int64(0)
-	if r.ActiveBranchCount.Valid {
-		branchCount = r.ActiveBranchCount.Int64
-	}
-	return scoring.RepoMetrics{
-		DaysSinceLastCommit: daysSince(r.LastCommitAt),
-		DaysSinceLastPR:     daysSince(r.LastPrCreatedAt),
-		CommitCount90d:      int(commitCount),
-		ActiveBranchCount:   int(branchCount),
-		HasRecentRelease:    false,
-		IsArchived:          r.IsArchived == 1,
-		IsDisabled:          r.IsDisabled == 1,
-	}
-}
-
-func dbProfileToScoringProfile(p dbgen.ScoringProfile) scoring.ScoringProfile {
-	return scoring.ScoringProfile{
-		Name:                   p.Name,
-		Version:                int(p.Version),
-		WLastCommit:            p.WLastCommit,
-		WLastPR:                p.WLastPr,
-		WCommitFrequency:       p.WCommitFrequency,
-		WBranchStaleness:       p.WBranchStaleness,
-		WNoReleases:            p.WNoReleases,
-		InactiveDaysThreshold:  int(p.InactiveDaysThreshold),
-		InactiveScoreThreshold: p.InactiveScoreThreshold,
-	}
 }
 
 func applyScanOverrides(cmd *cobra.Command, p *scoring.ScoringProfile) bool {
