@@ -77,10 +77,8 @@ func Run(ctx context.Context, q *dbgen.Queries, cfg Config, provFn ProviderFunc,
 	var fetchStarted atomic.Int32
 	var wg sync.WaitGroup
 	workers := max(cfg.Workers, 1)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for entry := range jobCh {
 				select {
 				case <-ctx.Done():
@@ -102,7 +100,7 @@ func Run(ctx context.Context, q *dbgen.Queries, cfg Config, provFn ProviderFunc,
 					resultCh <- result{entry: entry, fetched: false}
 				}
 			}
-		}()
+		})
 	}
 	for _, e := range allEntries {
 		jobCh <- e
