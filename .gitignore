@@ -3,3 +3,5 @@ bin/
 deadgit
 *.db
 coverage.out
+.worktrees/
+.superpowers/
