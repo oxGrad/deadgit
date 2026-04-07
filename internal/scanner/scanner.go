@@ -76,10 +76,7 @@ func Run(ctx context.Context, q *dbgen.Queries, cfg Config, provFn ProviderFunc,
 
 	var fetchStarted atomic.Int32
 	var wg sync.WaitGroup
-	workers := cfg.Workers
-	if workers < 1 {
-		workers = 1
-	}
+	workers := max(cfg.Workers, 1)
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
@@ -96,8 +93,9 @@ func Run(ctx context.Context, q *dbgen.Queries, cfg Config, provFn ProviderFunc,
 					if onProgress != nil {
 						onProgress(n, staleTotal, entry.repo.Name)
 					}
+					// provFn is called per repo refresh; callers should ensure it is cheap (no I/O per call).
 					if rerr := refreshSingleRepo(ctx, q, entry.org, entry.repo, provFn); rerr != nil {
-						_ = rerr
+						_ = rerr // refresh errors are silently discarded; affected rows retain stale data
 					}
 					resultCh <- result{entry: entry, fetched: true}
 				} else {
@@ -214,6 +212,8 @@ func fetchAndStoreAllRepos(ctx context.Context, q *dbgen.Queries, org dbgen.Orga
 }
 
 func refreshSingleRepo(ctx context.Context, q *dbgen.Queries, org dbgen.Organization, repo dbgen.ListRepositoriesByOrgRow, provFn ProviderFunc) error {
+	// Note: FetchRepos fetches all repos for the project to find this one repo;
+	// this is a known limitation inherited from the original implementation.
 	prov, err := provFn(org)
 	if err != nil {
 		return err
