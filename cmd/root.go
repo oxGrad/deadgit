@@ -11,6 +11,7 @@ import (
 
 	deaddb "github.com/oxGrad/deadgit/internal/db"
 	dbgen "github.com/oxGrad/deadgit/internal/db/generated"
+	"github.com/oxGrad/deadgit/internal/tui"
 )
 
 var (
@@ -24,6 +25,9 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "deadgit",
 	Short: "Scan GitHub and Azure DevOps repositories for inactivity",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return tui.Run(globalQ)
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		sqlDB, err := deaddb.Open(dbPath)
 		if err != nil {
