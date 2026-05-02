@@ -7,7 +7,7 @@ require (
 	github.com/fatih/color v1.19.0
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/spf13/cobra v1.10.2
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 	golang.org/x/term v0.42.0
 	modernc.org/sqlite v1.49.1
 )
