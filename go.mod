@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/fatih/color v1.19.0
-	github.com/olekukonko/tablewriter v1.1.4
+	github.com/olekukonko/tablewriter v1.1.5
 	github.com/spf13/cobra v1.10.2
 	go.uber.org/zap v1.28.0
 	golang.org/x/term v0.45.0
